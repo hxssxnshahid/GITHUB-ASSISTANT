@@ -13,7 +13,6 @@ A simple Windows desktop application that makes GitHub operations easy with just
 
 ## 📸 Screenshot
 
-Place an image in `assets/` (create the folder if it doesn't exist) and update the path if needed.
 
 ![App Screenshot](assets/screenshot.png)
 
