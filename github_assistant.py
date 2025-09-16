@@ -504,22 +504,39 @@ class UploadDialog:
     def push_existing_repo(self, project_path, repo, commit_msg, branch):
         """Push changes to existing git repository"""
         try:
-            # Add remote if not exists
+            # Ensure remote 'origin' exists and points to the selected repo
             result = subprocess.run(
                 ['git', 'remote', 'get-url', 'origin'],
                 cwd=project_path,
                 capture_output=True,
                 text=True
             )
+            current_remote_url = (result.stdout or '').strip()
+            desired_remote_url = repo.clone_url
+
             if result.returncode != 0:
+                # No origin → add it
                 subprocess.run(
-                    ['git', 'remote', 'add', 'origin', repo.clone_url],
+                    ['git', 'remote', 'add', 'origin', desired_remote_url],
                     cwd=project_path,
                     check=True,
                     capture_output=True,
                     text=True
                 )
-                self.log_callback("🔗 Added remote origin")
+                self.log_callback(f"🔗 Added remote origin → {desired_remote_url}")
+            else:
+                # Origin exists → retarget if pointing to a different repo
+                if current_remote_url.rstrip('/') != desired_remote_url.rstrip('/'):
+                    self.log_callback(f"🔁 Updating remote origin: {current_remote_url} → {desired_remote_url}")
+                    subprocess.run(
+                        ['git', 'remote', 'set-url', 'origin', desired_remote_url],
+                        cwd=project_path,
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                else:
+                    self.log_callback(f"🔗 Remote origin already set to {current_remote_url}")
 
             # Add all files
             subprocess.run(['git', 'add', '.'], cwd=project_path, check=True, capture_output=True, text=True)
