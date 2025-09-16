@@ -532,7 +532,10 @@ class UploadDialog:
                 capture_output=True,
                 text=True
             )
-            if diff_result.returncode != 0:
+            
+            has_changes = diff_result.returncode != 0
+            
+            if has_changes:
                 # There are staged changes → commit
                 subprocess.run(
                     ['git', 'commit', '-m', commit_msg],
@@ -566,8 +569,13 @@ class UploadDialog:
             )
             self.log_callback(f"🚀 Pushed to {branch} branch")
 
-            self.log_callback(f"✅ Project uploaded successfully to {repo.html_url}")
-            messagebox.showinfo("Success", f"Project uploaded to {repo.name} successfully!")
+            if has_changes:
+                self.log_callback(f"✅ Project uploaded successfully to {repo.html_url}")
+                messagebox.showinfo("Success", f"Project uploaded to {repo.name} successfully!")
+            else:
+                self.log_callback(f"ℹ️ Project is already up to date on GitHub")
+                messagebox.showinfo("Info", f"Project is already up to date on GitHub.\nNo changes were made to {repo.name}.")
+            
             self.dialog.destroy()
 
         except subprocess.CalledProcessError as e:
