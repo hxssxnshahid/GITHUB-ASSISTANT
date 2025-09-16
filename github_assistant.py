@@ -505,32 +505,76 @@ class UploadDialog:
         """Push changes to existing git repository"""
         try:
             # Add remote if not exists
-            result = subprocess.run(['git', 'remote', 'get-url', 'origin'], 
-                                  cwd=project_path, capture_output=True, text=True)
+            result = subprocess.run(
+                ['git', 'remote', 'get-url', 'origin'],
+                cwd=project_path,
+                capture_output=True,
+                text=True
+            )
             if result.returncode != 0:
-                # Add remote
-                subprocess.run(['git', 'remote', 'add', 'origin', repo.clone_url], 
-                             cwd=project_path, check=True)
+                subprocess.run(
+                    ['git', 'remote', 'add', 'origin', repo.clone_url],
+                    cwd=project_path,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
                 self.log_callback("🔗 Added remote origin")
-            
+
             # Add all files
-            subprocess.run(['git', 'add', '.'], cwd=project_path, check=True)
+            subprocess.run(['git', 'add', '.'], cwd=project_path, check=True, capture_output=True, text=True)
             self.log_callback("📝 Added files to staging")
-            
-            # Commit changes
-            subprocess.run(['git', 'commit', '-m', commit_msg], cwd=project_path, check=True)
-            self.log_callback("💾 Committed changes")
-            
+
+            # Check if there are staged changes
+            diff_result = subprocess.run(
+                ['git', 'diff', '--cached', '--quiet'],
+                cwd=project_path,
+                capture_output=True,
+                text=True
+            )
+            if diff_result.returncode != 0:
+                # There are staged changes → commit
+                subprocess.run(
+                    ['git', 'commit', '-m', commit_msg],
+                    cwd=project_path,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                self.log_callback("💾 Committed changes")
+            else:
+                self.log_callback("ℹ️ No changes to commit")
+
+            # Determine current branch if branch not provided
+            if not branch:
+                branch_out = subprocess.run(
+                    ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                    cwd=project_path,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                branch = branch_out.stdout.strip() or 'main'
+
             # Push to GitHub
-            subprocess.run(['git', 'push', '-u', 'origin', branch], cwd=project_path, check=True)
+            subprocess.run(
+                ['git', 'push', '-u', 'origin', branch],
+                cwd=project_path,
+                check=True,
+                capture_output=True,
+                text=True
+            )
             self.log_callback(f"🚀 Pushed to {branch} branch")
-            
+
             self.log_callback(f"✅ Project uploaded successfully to {repo.html_url}")
             messagebox.showinfo("Success", f"Project uploaded to {repo.name} successfully!")
             self.dialog.destroy()
-            
+
         except subprocess.CalledProcessError as e:
-            error_msg = f"Git command failed: {e.stderr}"
+            stderr = (e.stderr or '').strip()
+            stdout = (e.stdout or '').strip()
+            combined = stderr if stderr else stdout if stdout else str(e)
+            error_msg = f"Git command failed: {combined}"
             self.log_callback(f"❌ {error_msg}")
             messagebox.showerror("Error", error_msg)
         except FileNotFoundError:
@@ -697,8 +741,18 @@ class UpdateDialog:
                 subprocess.run(['git', 'commit', '-m', commit_msg], cwd=self.project_path, check=True)
                 self.log_callback("💾 Committed changes")
                 
+                # Determine current branch
+                branch_out = subprocess.run(
+                    ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                    cwd=self.project_path,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                current_branch = branch_out.stdout.strip() or 'main'
+
                 # Push to GitHub
-                subprocess.run(['git', 'push', 'origin', 'main'], cwd=self.project_path, check=True)
+                subprocess.run(['git', 'push', 'origin', current_branch], cwd=self.project_path, check=True, capture_output=True, text=True)
                 self.log_callback("🚀 Pushed changes to GitHub")
                 
                 self.dialog.after(0, lambda: self.update_success(repo_name, "Repository updated successfully"))
