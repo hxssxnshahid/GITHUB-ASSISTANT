@@ -25,7 +25,14 @@ class GitHubAssistant:
         self.config_file = "github_config.json"
         self.load_config()
         
+        # Check if this is first time setup
+        self.is_first_time = not self.config.get('token') or not self.config.get('setup_complete', False)
+        
         self.setup_ui()
+        
+        # Show first-time setup if needed
+        if self.is_first_time:
+            self.show_first_time_setup()
         
     def setup_ui(self):
         # Main frame
@@ -292,29 +299,76 @@ class GitHubAssistant:
             messagebox.showerror("Error", "Git is not installed or not in PATH. Please install Git from https://git-scm.com/")
             return
         
-        # Check for large files
-        project_path = self.project_var.get()
-        large_files, total_size = self.check_large_files(project_path)
+        # Check if already processing
+        if hasattr(self, '_upload_in_progress') and self._upload_in_progress:
+            self.log_message("⚠️ Upload already in progress, please wait...")
+            return
         
-        if large_files:
-            # Show warning about large files
-            large_file_list = "\n".join([f"- {os.path.basename(f[0])} ({f[1] // (1024*1024)}MB)" for f in large_files[:5]])
-            if len(large_files) > 5:
-                large_file_list += f"\n- ... and {len(large_files) - 5} more files"
-            
-            total_mb = total_size // (1024*1024)
-            warning_msg = f"⚠️ LARGE FILES DETECTED ⚠️\n\n" \
-                         f"Total project size: {total_mb}MB\n" \
-                         f"Large files (>100MB):\n{large_file_list}\n\n" \
-                         f"GitHub has a 100MB file limit. Large files will be handled with Git LFS.\n" \
-                         f"Continue with upload?"
-            
-            if not messagebox.askyesno("Large Files Detected", warning_msg):
-                return
+        # Set processing state
+        self._upload_in_progress = True
+        self.set_status("Checking project files...")
         
-        # Create dialog for upload details
-        dialog = UploadDialog(self.root, self.github, project_path, self.log_message, self.set_status)
-        self.root.wait_window(dialog.dialog)
+        # Run file checking in background thread
+        def check_files_thread():
+            try:
+                # Check for large files
+                project_path = self.project_var.get()
+                large_files, total_size = self.check_large_files(project_path)
+                
+                # Update UI in main thread
+                self.root.after(0, lambda: self.handle_file_check_result(project_path, large_files, total_size))
+                
+            except Exception as e:
+                self.root.after(0, lambda: self.handle_file_check_error(str(e)))
+        
+        # Start background thread
+        thread = threading.Thread(target=check_files_thread, daemon=True)
+        thread.start()
+    
+    def handle_file_check_result(self, project_path, large_files, total_size):
+        """Handle file check results in main thread"""
+        try:
+            if large_files:
+                # Show warning about large files
+                large_file_list = "\n".join([f"- {os.path.basename(f[0])} ({f[1] // (1024*1024)}MB)" for f in large_files[:5]])
+                if len(large_files) > 5:
+                    large_file_list += f"\n- ... and {len(large_files) - 5} more files"
+                
+                total_mb = total_size // (1024*1024)
+                warning_msg = f"⚠️ LARGE FILES DETECTED ⚠️\n\n" \
+                             f"Total project size: {total_mb}MB\n" \
+                             f"Large files (>100MB):\n{large_file_list}\n\n" \
+                             f"GitHub has a 100MB file limit. Large files will be handled with Git LFS.\n\n" \
+                             f"Make sure Git LFS is installed: https://git-lfs.github.io/\n" \
+                             f"Continue with upload?"
+                
+                if not messagebox.askyesno("Large Files Detected", warning_msg):
+                    self._upload_in_progress = False
+                    self.set_status("Ready")
+                    return
+            
+            # Create dialog for upload details
+            dialog = UploadDialog(self.root, self.github, project_path, self.log_message, self.set_status)
+            self.root.wait_window(dialog.dialog)
+            
+        finally:
+            self._upload_in_progress = False
+            self.set_status("Ready")
+    
+    def handle_file_check_error(self, error_msg):
+        """Handle file check errors in main thread"""
+        self.log_message(f"❌ Error checking files: {error_msg}")
+        self._upload_in_progress = False
+        self.set_status("Ready")
+    
+    def show_first_time_setup(self):
+        """Show first-time setup wizard"""
+        setup_dialog = FirstTimeSetupDialog(self.root, self.log_message, self.set_status)
+        self.root.wait_window(setup_dialog.dialog)
+        
+        # Mark setup as complete
+        self.config['setup_complete'] = True
+        self.save_config()
         
     def update_repo(self):
         """Update existing repository"""
@@ -562,8 +616,14 @@ class UploadDialog:
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=6, column=0, pady=(20, 0))
         
-        ttk.Button(button_frame, text="Upload Project", command=self.upload_project).pack(side=tk.LEFT, padx=(0, 10))
+        self.upload_btn = ttk.Button(button_frame, text="Upload Project", command=self.upload_project)
+        self.upload_btn.pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(button_frame, text="Cancel", command=self.dialog.destroy).pack(side=tk.LEFT)
+        
+        # Progress indicator
+        self.progress_var = tk.StringVar(value="Ready to upload")
+        self.progress_label = ttk.Label(main_frame, textvariable=self.progress_var, font=('Arial', 9))
+        self.progress_label.grid(row=7, column=0, pady=(10, 0))
         
     def load_repositories(self, combo):
         """Load user repositories into combobox"""
@@ -575,39 +635,105 @@ class UploadDialog:
                 combo.current(0)
         except Exception as e:
             self.log_callback(f"❌ Failed to load repositories: {str(e)}")
+    
+    def setup_git_lfs(self, project_path):
+        """Setup Git LFS for large files"""
+        try:
+            # Check if Git LFS is available
+            subprocess.run(['git', 'lfs', 'version'], check=True, capture_output=True, text=True)
+            
+            # Initialize Git LFS
+            subprocess.run(['git', 'lfs', 'install'], cwd=project_path, check=True, capture_output=True, text=True)
+            
+            # Track common large file types
+            large_file_patterns = [
+                '*.zip', '*.rar', '*.7z', '*.tar', '*.gz',
+                '*.exe', '*.msi', '*.dmg', '*.pkg',
+                '*.mp4', '*.avi', '*.mov', '*.mkv',
+                '*.iso', '*.img', '*.bin',
+                '*.dll', '*.so', '*.dylib',
+                '*.db', '*.sqlite', '*.sqlite3'
+            ]
+            
+            for pattern in large_file_patterns:
+                try:
+                    subprocess.run(['git', 'lfs', 'track', pattern], cwd=project_path, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError:
+                    pass  # Pattern might already be tracked
+            
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
             
     def upload_project(self):
         repo_name = self.repo_var.get().strip()
         if not repo_name:
             messagebox.showerror("Error", "Please select a repository")
             return
-            
-        try:
-            repo = self.github.get_user().get_repo(repo_name)
-            commit_msg = self.commit_var.get().strip() or "Update project"
-            branch = self.branch_var.get().strip() or "main"
-            
-            self.log_callback(f"📤 Uploading project to {repo_name}...")
-            
-            # Get the project path from the main app
-            project_path = self.project_path
-            
-            # Check if it's already a git repository
-            if os.path.exists(os.path.join(project_path, '.git')):
-                self.log_callback("📁 Project is already a git repository, pushing changes...")
-                self.push_existing_repo(project_path, repo, commit_msg, branch)
-            else:
-                self.log_callback("📁 Initializing new git repository and uploading...")
-                self.upload_new_repo(project_path, repo, commit_msg, branch)
-            
-        except GithubException as e:
-            error_msg = f"Failed to upload project: {str(e)}"
-            self.log_callback(f"❌ {error_msg}")
-            messagebox.showerror("Error", error_msg)
-        except Exception as e:
-            error_msg = f"Upload failed: {str(e)}"
-            self.log_callback(f"❌ {error_msg}")
-            messagebox.showerror("Error", error_msg)
+        
+        # Check if already uploading
+        if hasattr(self, '_uploading') and self._uploading:
+            self.log_callback("⚠️ Upload already in progress, please wait...")
+            return
+        
+        # Disable button and show loading
+        self._uploading = True
+        self.upload_btn.config(state='disabled', text="Uploading...")
+        self.progress_var.set("Starting upload...")
+        self.dialog.update()
+        
+        # Run upload in background thread
+        def upload_thread():
+            try:
+                repo = self.github.get_user().get_repo(repo_name)
+                commit_msg = self.commit_var.get().strip() or "Update project"
+                branch = self.branch_var.get().strip() or "main"
+                
+                self.log_callback(f"📤 Uploading project to {repo_name}...")
+                self.dialog.after(0, lambda: self.progress_var.set("Preparing upload..."))
+                
+                # Get the project path from the main app
+                project_path = self.project_path
+                
+                # Check if it's already a git repository
+                if os.path.exists(os.path.join(project_path, '.git')):
+                    self.log_callback("📁 Project is already a git repository, pushing changes...")
+                    self.dialog.after(0, lambda: self.progress_var.set("Pushing to existing repository..."))
+                    self.push_existing_repo(project_path, repo, commit_msg, branch)
+                else:
+                    self.log_callback("📁 Initializing new git repository and uploading...")
+                    self.dialog.after(0, lambda: self.progress_var.set("Initializing new repository..."))
+                    self.upload_new_repo(project_path, repo, commit_msg, branch)
+                
+                # Success - update UI in main thread
+                self.dialog.after(0, lambda: self.upload_success())
+                
+            except GithubException as e:
+                error_msg = f"Failed to upload project: {str(e)}"
+                self.log_callback(f"❌ {error_msg}")
+                self.dialog.after(0, lambda: self.upload_error(error_msg))
+            except Exception as e:
+                error_msg = f"Upload failed: {str(e)}"
+                self.log_callback(f"❌ {error_msg}")
+                self.dialog.after(0, lambda: self.upload_error(error_msg))
+        
+        # Start background thread
+        thread = threading.Thread(target=upload_thread, daemon=True)
+        thread.start()
+    
+    def upload_success(self):
+        """Handle successful upload"""
+        self._uploading = False
+        self.upload_btn.config(state='normal', text="Upload Project")
+        self.progress_var.set("Upload completed successfully!")
+        self.dialog.after(2000, self.dialog.destroy)  # Close dialog after 2 seconds
+    
+    def upload_error(self, error_msg):
+        """Handle upload error"""
+        self._uploading = False
+        self.upload_btn.config(state='normal', text="Upload Project")
+        self.progress_var.set("Upload failed")
+        messagebox.showerror("Error", error_msg)
     
     def push_existing_repo(self, project_path, repo, commit_msg, branch):
         """Push changes to existing git repository"""
@@ -647,6 +773,7 @@ class UploadDialog:
                     self.log_callback(f"🔗 Remote origin already set to {current_remote_url}")
 
             # Add all files
+            self.dialog.after(0, lambda: self.progress_var.set("Adding files to staging..."))
             subprocess.run(['git', 'add', '.'], cwd=project_path, check=True, capture_output=True, text=True)
             self.log_callback("📝 Added files to staging")
 
@@ -662,6 +789,7 @@ class UploadDialog:
             
             if has_changes:
                 # There are staged changes → commit
+                self.dialog.after(0, lambda: self.progress_var.set("Committing changes..."))
                 subprocess.run(
                     ['git', 'commit', '-m', commit_msg],
                     cwd=project_path,
@@ -695,6 +823,7 @@ class UploadDialog:
 
             # Push to GitHub with progress indication
             self.log_callback(f"🚀 Pushing to {branch} branch... (this may take a while for large files)")
+            self.dialog.after(0, lambda: self.progress_var.set(f"Pushing to {branch} branch... (this may take a while)"))
             try:
                 subprocess.run(
                     ['git', 'push', '-u', 'origin', branch],
@@ -755,6 +884,7 @@ class UploadDialog:
                 self.log_callback("📦 Git LFS initialized for large files")
             else:
                 self.log_callback("⚠️ Git LFS not available - large files may cause issues")
+                self.log_callback("💡 Install Git LFS from: https://git-lfs.github.io/")
             
             # Configure Git for large files
             try:
@@ -787,11 +917,13 @@ class UploadDialog:
                     pass  # File might not be staged yet
             
             # Add all files except config
+            self.dialog.after(0, lambda: self.progress_var.set("Adding files to staging..."))
             subprocess.run(['git', 'add', '.'], cwd=project_path, check=True)
             subprocess.run(['git', 'reset', 'github_config.json'], cwd=project_path, check=True)
             self.log_callback("📝 Added files to staging (excluding config)")
             
             # Commit changes
+            self.dialog.after(0, lambda: self.progress_var.set("Committing changes..."))
             subprocess.run(['git', 'commit', '-m', commit_msg], cwd=project_path, check=True)
             self.log_callback("💾 Committed changes")
             
@@ -804,6 +936,7 @@ class UploadDialog:
             
             # Push to GitHub with progress indication
             self.log_callback(f"🚀 Pushing to {branch} branch... (this may take a while for large files)")
+            self.dialog.after(0, lambda: self.progress_var.set(f"Pushing to {branch} branch... (this may take a while)"))
             try:
                 # Use git push with progress for large files
                 result = subprocess.run(
@@ -1273,6 +1406,174 @@ def main():
     root = tk.Tk()
     app = GitHubAssistant(root)
     root.mainloop()
+
+class FirstTimeSetupDialog:
+    def __init__(self, parent, log_callback, status_callback):
+        self.log_callback = log_callback
+        self.status_callback = status_callback
+        
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("🚀 Welcome to GitHub Assistant!")
+        self.dialog.geometry("600x500")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # Center the dialog
+        self.dialog.geometry("+%d+%d" % (parent.winfo_rootx() + 50, parent.winfo_rooty() + 50))
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        main_frame = ttk.Frame(self.dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Welcome message
+        welcome_label = ttk.Label(main_frame, text="🚀 Welcome to GitHub Assistant!", 
+                                 font=('Arial', 16, 'bold'))
+        welcome_label.pack(pady=(0, 20))
+        
+        # Instructions
+        instructions = ttk.Label(main_frame, 
+                               text="Let's get you set up in just a few steps!",
+                               font=('Arial', 12))
+        instructions.pack(pady=(0, 20))
+        
+        # Step 1
+        step1_frame = ttk.LabelFrame(main_frame, text="Step 1: Get a GitHub Token", padding="15")
+        step1_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        step1_text = """To upload projects to GitHub, you need a Personal Access Token.
+
+1. Click the button below to open GitHub
+2. Click "Generate new token (classic)"
+3. Give it a name like "GitHub Assistant"
+4. Select these scopes: repo, public_repo
+5. Click "Generate token"
+6. Copy the token (you won't see it again!)"""
+        
+        ttk.Label(step1_frame, text=step1_text, justify=tk.LEFT).pack(anchor=tk.W)
+        
+        ttk.Button(step1_frame, text="🌐 Open GitHub Token Page", 
+                  command=self.open_token_page).pack(pady=(10, 0))
+        
+        # Step 2
+        step2_frame = ttk.LabelFrame(main_frame, text="Step 2: Enter Your Token", padding="15")
+        step2_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(step2_frame, text="Paste your token here:").pack(anchor=tk.W)
+        
+        self.token_var = tk.StringVar()
+        token_entry = ttk.Entry(step2_frame, textvariable=self.token_var, show="*", width=50)
+        token_entry.pack(fill=tk.X, pady=(5, 10))
+        
+        # Step 3
+        step3_frame = ttk.LabelFrame(main_frame, text="Step 3: Test Connection", padding="15")
+        step3_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        ttk.Label(step3_frame, text="Click the button below to test your connection:").pack(anchor=tk.W)
+        
+        self.test_btn = ttk.Button(step3_frame, text="🔗 Test Connection", 
+                                  command=self.test_connection)
+        self.test_btn.pack(pady=(10, 0))
+        
+        # Status
+        self.status_var = tk.StringVar(value="Ready to test connection")
+        status_label = ttk.Label(step3_frame, textvariable=self.status_var, 
+                               font=('Arial', 9), foreground='blue')
+        status_label.pack(pady=(10, 0))
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(20, 0))
+        
+        self.finish_btn = ttk.Button(button_frame, text="✅ Finish Setup", 
+                                    command=self.finish_setup, state='disabled')
+        self.finish_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        ttk.Button(button_frame, text="⏭️ Skip for Now", 
+                  command=self.skip_setup).pack(side=tk.RIGHT)
+    
+    def open_token_page(self):
+        """Open GitHub token creation page"""
+        webbrowser.open("https://github.com/settings/tokens/new")
+        self.log_callback("🌐 Opened GitHub token creation page")
+    
+    def test_connection(self):
+        """Test GitHub connection"""
+        token = self.token_var.get().strip()
+        if not token:
+            messagebox.showerror("Error", "Please enter a GitHub token first")
+            return
+        
+        # Basic token validation
+        if not token.startswith(('ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_')):
+            messagebox.showerror("Error", "Invalid token format. GitHub tokens should start with 'ghp_', 'gho_', 'ghu_', 'ghs_', or 'ghr_'")
+            return
+        
+        # Disable button and show testing
+        self.test_btn.config(state='disabled', text="Testing...")
+        self.status_var.set("Testing connection...")
+        self.dialog.update()
+        
+        # Test in background thread
+        def test_thread():
+            try:
+                from github import Github
+                github = Github(token)
+                user = github.get_user()
+                
+                # Update UI in main thread
+                self.dialog.after(0, lambda: self.connection_success(user.login))
+                
+            except Exception as e:
+                self.dialog.after(0, lambda: self.connection_error(str(e)))
+        
+        thread = threading.Thread(target=test_thread, daemon=True)
+        thread.start()
+    
+    def connection_success(self, username):
+        """Handle successful connection"""
+        self.test_btn.config(state='normal', text="🔗 Test Connection")
+        self.status_var.set(f"✅ Connected as {username}")
+        self.finish_btn.config(state='normal')
+        self.log_callback(f"✅ Connection successful: {username}")
+    
+    def connection_error(self, error_msg):
+        """Handle connection error"""
+        self.test_btn.config(state='normal', text="🔗 Test Connection")
+        self.status_var.set("❌ Connection failed")
+        messagebox.showerror("Connection Error", f"Failed to connect to GitHub:\n{error_msg}")
+        self.log_callback(f"❌ Connection failed: {error_msg}")
+    
+    def finish_setup(self):
+        """Finish setup and save token"""
+        token = self.token_var.get().strip()
+        if not token:
+            messagebox.showerror("Error", "Please enter a GitHub token first")
+            return
+        
+        # Save token to config
+        config = {}
+        if os.path.exists("github_config.json"):
+            try:
+                with open("github_config.json", 'r') as f:
+                    config = json.load(f)
+            except:
+                config = {}
+        
+        config['token'] = token
+        config['setup_complete'] = True
+        
+        with open("github_config.json", 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        self.log_callback("✅ Setup completed successfully!")
+        self.dialog.destroy()
+    
+    def skip_setup(self):
+        """Skip setup for now"""
+        self.log_callback("⏭️ Setup skipped - you can configure later")
+        self.dialog.destroy()
 
 if __name__ == "__main__":
     main()

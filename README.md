@@ -11,11 +11,15 @@ A simple Windows desktop application that makes GitHub operations easy with just
 - **🗑️ Delete Repository** - Safely delete repositories (with confirmation)
 - **📊 View Repository Info** - Get detailed information about your repositories
 
-## 🛠️ Installation
+## 🛠️ Installation & Usage
 
 1. **Download the files** to a folder on your computer
-2. **Run `setup.bat`** to install required dependencies
-3. **Run `run.bat`** to start the application
+2. **Run `START_HERE.bat`** to get started, follow the instructions.
+
+**Always use 'START_HERE.bat' to launch the application, input 1 for first time, and 2 if you have already done the first time setup and want to use the app as normal**
+
+**Once you are done with using the app, you can close both the windows, the application and the previously opened terminal.**
+
 
 ### Manual Installation
 
