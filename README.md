@@ -13,12 +13,17 @@ A simple Windows desktop application that makes GitHub operations easy with just
 
 ## 🛠️ Installation & Usage
 
-1. **Download the files** to a folder on your computer
-2. **Run `START_HERE.bat`** to get started, follow the instructions.
+1. **Download** this repository and extract the files into a folder on your computer.
+2. Start the application by double-clicking **START_HERE.bat.**
 
-**Always use 'START_HERE.bat' to launch the application, input 1 for first time, and 2 if you have already done the first time setup and want to use the app as normal**
+3.When prompted:
+      -Type 1 the very first time you run it (this will complete the first time setup).
 
-**Once you are done with using the app, you can close both the windows, the application and the previously opened terminal.**
+      -Type 2 on all future runs to **launch and use the app normally.**
+
+⚠️ Always open the app using START_HERE.bat. Do not try to run it directly from other files.
+
+👉 When you’re finished, just close both windows (the app and the terminal that opened with it).
 
 
 ### Manual Installation
