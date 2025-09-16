@@ -576,6 +576,15 @@ class UploadDialog:
                 )
                 branch = branch_out.stdout.strip() or 'main'
 
+            # Check if this will be the first push to this remote branch
+            ls_remote = subprocess.run(
+                ['git', 'ls-remote', '--heads', 'origin', branch],
+                cwd=project_path,
+                capture_output=True,
+                text=True
+            )
+            is_first_push = (ls_remote.returncode != 0) or (ls_remote.stdout.strip() == '')
+
             # Push to GitHub
             subprocess.run(
                 ['git', 'push', '-u', 'origin', branch],
@@ -586,7 +595,7 @@ class UploadDialog:
             )
             self.log_callback(f"🚀 Pushed to {branch} branch")
 
-            if has_changes:
+            if has_changes or is_first_push:
                 self.log_callback(f"✅ Project uploaded successfully to {repo.html_url}")
                 messagebox.showinfo("Success", f"Project uploaded to {repo.name} successfully!")
             else:
