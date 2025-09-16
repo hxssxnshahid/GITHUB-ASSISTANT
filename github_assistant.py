@@ -24,6 +24,13 @@ class GitHubAssistant:
         # Load configuration
         self.config_file = "github_config.json"
         self.load_config()
+        # Clear any previously saved project path; only keep token
+        if 'last_project' in self.config:
+            try:
+                del self.config['last_project']
+                self.save_config()
+            except Exception:
+                pass
         
         # Check if this is first time setup
         self.is_first_time = not self.config.get('token') or not self.config.get('setup_complete', False)
@@ -71,7 +78,7 @@ class GitHubAssistant:
         project_frame.columnconfigure(1, weight=1)
         
         ttk.Label(project_frame, text="Project Folder:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        self.project_var = tk.StringVar(value=self.config.get('last_project', ''))
+        self.project_var = tk.StringVar(value='')
         project_entry = ttk.Entry(project_frame, textvariable=self.project_var, width=50)
         project_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
         
@@ -271,8 +278,6 @@ class GitHubAssistant:
         if folder:
             self.project_var.set(folder)
             self.project_path = folder
-            self.config['last_project'] = folder
-            self.save_config()
             self.log_message(f"📁 Selected project folder: {folder}")
             
     def create_repo(self):
@@ -1059,7 +1064,7 @@ class UpdateDialog:
                     return
                 
                 # Add all files
-                subprocess.run(['git', 'add', '.'], cwd=self.project_path, check=True)
+                subprocess.run(['git', 'add', '.'], cwd=self.project_path, check=True, capture_output=True, text=True)
                 self.log_callback("📝 Added files to staging")
                 
                 # Check if there are changes to commit
@@ -1070,8 +1075,37 @@ class UpdateDialog:
                     self.dialog.after(0, lambda: self.update_success(repo_name, "No changes to commit"))
                     return
                 
+                # Ensure Git identity is configured locally
+                try:
+                    name_out = subprocess.run(
+                        ['git', 'config', '--get', 'user.name'],
+                        cwd=self.project_path,
+                        capture_output=True,
+                        text=True
+                    )
+                    email_out = subprocess.run(
+                        ['git', 'config', '--get', 'user.email'],
+                        cwd=self.project_path,
+                        capture_output=True,
+                        text=True
+                    )
+                    missing_name = (name_out.returncode != 0) or (not (name_out.stdout or '').strip())
+                    missing_email = (email_out.returncode != 0) or (not (email_out.stdout or '').strip())
+                    if missing_name or missing_email:
+                        login = self.github.get_user().login
+                        fallback_name = login
+                        fallback_email = f"{login}@users.noreply.github.com"
+                        if missing_name:
+                            subprocess.run(['git', 'config', 'user.name', fallback_name], cwd=self.project_path, check=True)
+                        if missing_email:
+                            subprocess.run(['git', 'config', 'user.email', fallback_email], cwd=self.project_path, check=True)
+                        self.log_callback("ℹ️ Configured local Git identity for this repository")
+                except subprocess.CalledProcessError:
+                    # If we fail to set identity, commit may still produce a clearer error below
+                    pass
+
                 # Commit changes
-                subprocess.run(['git', 'commit', '-m', commit_msg], cwd=self.project_path, check=True)
+                subprocess.run(['git', 'commit', '-m', commit_msg], cwd=self.project_path, check=True, capture_output=True, text=True)
                 self.log_callback("💾 Committed changes")
                 
                 # Determine current branch
@@ -1091,7 +1125,10 @@ class UpdateDialog:
                 self.dialog.after(0, lambda: self.update_success(repo_name, "Repository updated successfully"))
                 
             except subprocess.CalledProcessError as e:
-                error_msg = f"Git command failed: {e.stderr}"
+                stderr = (e.stderr or '').strip() if hasattr(e, 'stderr') else ''
+                stdout = (e.stdout or '').strip() if hasattr(e, 'stdout') else ''
+                combined = stderr if stderr else stdout if stdout else str(e)
+                error_msg = f"Git command failed: {combined}"
                 self.log_callback(f"❌ {error_msg}")
                 self.dialog.after(0, lambda: self.update_error(error_msg))
             except FileNotFoundError:
