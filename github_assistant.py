@@ -116,6 +116,14 @@ class GitHubAssistant:
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
         self.log_text.see(tk.END)
         self.root.update_idletasks()
+    
+    def check_git_available(self):
+        """Check if Git is available on the system"""
+        try:
+            subprocess.run(['git', '--version'], check=True, capture_output=True, text=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
         
     def set_status(self, status):
         """Update status bar"""
@@ -129,7 +137,8 @@ class GitHubAssistant:
             try:
                 with open(self.config_file, 'r') as f:
                     self.config = json.load(f)
-            except:
+            except (json.JSONDecodeError, IOError, OSError) as e:
+                print(f"[DEBUG] Config file error: {e}")
                 self.config = {}
         else:
             self.config = {}
@@ -144,6 +153,11 @@ class GitHubAssistant:
         token = self.token_var.get().strip()
         if not token:
             messagebox.showerror("Error", "Please enter a GitHub Personal Access Token")
+            return
+        
+        # Basic token validation
+        if not token.startswith(('ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_')):
+            messagebox.showerror("Error", "Invalid token format. GitHub tokens should start with 'ghp_', 'gho_', 'ghu_', 'ghs_', or 'ghr_'")
             return
             
         try:
@@ -220,6 +234,10 @@ class GitHubAssistant:
         if not self.project_var.get():
             messagebox.showerror("Error", "Please select a project folder")
             return
+        
+        if not self.check_git_available():
+            messagebox.showerror("Error", "Git is not installed or not in PATH. Please install Git from https://git-scm.com/")
+            return
             
         # Create dialog for upload details
         dialog = UploadDialog(self.root, self.github, self.project_var.get(), self.log_message, self.set_status)
@@ -234,6 +252,10 @@ class GitHubAssistant:
         if not self.project_var.get():
             messagebox.showerror("Error", "Please select a project folder")
             return
+        
+        if not self.check_git_available():
+            messagebox.showerror("Error", "Git is not installed or not in PATH. Please install Git from https://git-scm.com/")
+            return
             
         # Create dialog for update details
         dialog = UpdateDialog(self.root, self.github, self.project_var.get(), self.log_message, self.set_status)
@@ -241,6 +263,10 @@ class GitHubAssistant:
         
     def clone_repo(self):
         """Clone a repository"""
+        if not self.check_git_available():
+            messagebox.showerror("Error", "Git is not installed or not in PATH. Please install Git from https://git-scm.com/")
+            return
+        
         dialog = CloneDialog(self.root, self.log_message)
         self.root.wait_window(dialog.dialog)
         
@@ -315,6 +341,15 @@ class RepoCreateDialog:
         name = self.name_var.get().strip()
         if not name:
             messagebox.showerror("Error", "Please enter a repository name")
+            return
+        
+        # Validate repository name
+        if not name.replace('-', '').replace('_', '').replace('.', '').isalnum():
+            messagebox.showerror("Error", "Repository name can only contain letters, numbers, hyphens, underscores, and dots")
+            return
+        
+        if len(name) > 100:
+            messagebox.showerror("Error", "Repository name must be 100 characters or less")
             return
             
         # Disable button and show processing
@@ -608,11 +643,23 @@ class UploadDialog:
             stderr = (e.stderr or '').strip()
             stdout = (e.stdout or '').strip()
             combined = stderr if stderr else stdout if stdout else str(e)
-            error_msg = f"Git command failed: {combined}"
+            
+            # Provide more helpful error messages
+            if "not a git repository" in combined.lower():
+                error_msg = "This folder is not a Git repository. Please use 'Upload Project' instead."
+            elif "authentication failed" in combined.lower():
+                error_msg = "Git authentication failed. Please check your Git credentials."
+            elif "remote origin already exists" in combined.lower():
+                error_msg = "Remote origin already exists. The operation will continue with the existing remote."
+                self.log_callback(f"⚠️ {error_msg}")
+                return  # This is not actually an error
+            else:
+                error_msg = f"Git command failed: {combined}"
+            
             self.log_callback(f"❌ {error_msg}")
             messagebox.showerror("Error", error_msg)
         except FileNotFoundError:
-            error_msg = "Git is not installed or not in PATH"
+            error_msg = "Git is not installed or not in PATH. Please install Git from https://git-scm.com/"
             self.log_callback(f"❌ {error_msg}")
             messagebox.showerror("Error", error_msg)
     
@@ -642,7 +689,7 @@ class UploadDialog:
                     subprocess.run(['git', 'rm', '--cached', 'github_config.json'], 
                                  cwd=project_path, check=True)
                     self.log_callback("🔒 Removed config file from staging (contains sensitive data)")
-                except:
+                except subprocess.CalledProcessError:
                     pass  # File might not be staged yet
             
             # Add all files except config
@@ -658,7 +705,7 @@ class UploadDialog:
             try:
                 subprocess.run(['git', 'branch', '-M', branch], cwd=project_path, check=True)
                 self.log_callback(f"🏷️ Renamed branch to {branch}")
-            except:
+            except subprocess.CalledProcessError:
                 pass  # Branch might already be main
             
             # Push to GitHub
@@ -670,11 +717,22 @@ class UploadDialog:
             self.dialog.destroy()
             
         except subprocess.CalledProcessError as e:
-            error_msg = f"Git command failed: {e.stderr}"
+            stderr = (e.stderr or '').strip()
+            stdout = (e.stdout or '').strip()
+            combined = stderr if stderr else stdout if stdout else str(e)
+            
+            # Provide more helpful error messages
+            if "authentication failed" in combined.lower():
+                error_msg = "Git authentication failed. Please check your Git credentials."
+            elif "repository not found" in combined.lower():
+                error_msg = "Repository not found. Please check the repository name and permissions."
+            else:
+                error_msg = f"Git command failed: {combined}"
+            
             self.log_callback(f"❌ {error_msg}")
             messagebox.showerror("Error", error_msg)
         except FileNotFoundError:
-            error_msg = "Git is not installed or not in PATH"
+            error_msg = "Git is not installed or not in PATH. Please install Git from https://git-scm.com/"
             self.log_callback(f"❌ {error_msg}")
             messagebox.showerror("Error", error_msg)
 
@@ -877,6 +935,11 @@ class CloneDialog:
             
         if not directory:
             messagebox.showerror("Error", "Please select a clone directory")
+            return
+        
+        # Basic URL validation
+        if not (url.startswith('https://github.com/') or url.startswith('git@github.com:')):
+            messagebox.showerror("Error", "Please enter a valid GitHub repository URL (https://github.com/username/repo or git@github.com:username/repo.git)")
             return
             
         try:
@@ -1082,7 +1145,7 @@ README:
         try:
             readme = repo.get_readme()
             return readme.decoded_content.decode('utf-8')[:500] + "..." if len(readme.decoded_content) > 500 else readme.decoded_content.decode('utf-8')
-        except:
+        except (GithubException, UnicodeDecodeError, AttributeError):
             return "No README available"
 
 def main():
@@ -1096,7 +1159,7 @@ def main():
             sys.stdout = open('CONOUT$', 'w')
             sys.stderr = open('CONOUT$', 'w')
             print("Debug console enabled - you can see detailed logs here")
-        except:
+        except (OSError, IOError, AttributeError):
             print("Could not enable console, debug output will go to terminal")
     
     root = tk.Tk()

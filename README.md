@@ -108,8 +108,10 @@ python github_assistant.py
 ## 🚨 Important Security Notes
 
 - Never share your GitHub Personal Access Token
-- The token is stored locally on your computer
+- The token is stored locally on your computer in `github_config.json`
+- The config file is automatically excluded from Git commits via `.gitignore`
 - If you suspect your token is compromised, revoke it on GitHub and create a new one
+- Always use tokens with minimal required permissions
 
 ## 🐛 Troubleshooting
 
