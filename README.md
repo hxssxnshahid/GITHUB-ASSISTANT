@@ -155,6 +155,15 @@ If you encounter any issues:
 2. Make sure all requirements are installed
 3. Verify your GitHub token has the correct permissions
 
+## ⚖️ Disclaimer  
+
+- This tool is provided **“as is” without warranty of any kind**.  
+- You are fully responsible for any actions taken using GitHub Assistant.  
+- The developer is **not liable for any data loss, repository deletion, or unintended consequences** resulting from the use of this application.  
+- Always double-check before performing destructive actions (such as deleting repositories).  
+- By using this tool, you agree to take full responsibility for your GitHub account and data.  
+
+
 ## 🎉 Enjoy!
 
 This tool should make your GitHub workflow much easier. No more command line needed for basic GitHub operations!
