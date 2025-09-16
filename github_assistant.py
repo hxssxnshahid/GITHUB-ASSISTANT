@@ -550,9 +550,27 @@ class UploadDialog:
                          cwd=project_path, check=True)
             self.log_callback("🔗 Added remote origin")
             
-            # Add all files
+            # Create .gitignore if it doesn't exist
+            gitignore_path = os.path.join(project_path, '.gitignore')
+            if not os.path.exists(gitignore_path):
+                with open(gitignore_path, 'w') as f:
+                    f.write("# GitHub Assistant Configuration\ngithub_config.json\n\n# Python\n__pycache__/\n*.py[cod]\n*$py.class\n\n# IDE\n.vscode/\n.idea/\n\n# OS\n.DS_Store\nThumbs.db\n")
+                self.log_callback("📝 Created .gitignore file")
+            
+            # Remove config file from staging if it exists
+            config_file = os.path.join(project_path, 'github_config.json')
+            if os.path.exists(config_file):
+                try:
+                    subprocess.run(['git', 'rm', '--cached', 'github_config.json'], 
+                                 cwd=project_path, check=True)
+                    self.log_callback("🔒 Removed config file from staging (contains sensitive data)")
+                except:
+                    pass  # File might not be staged yet
+            
+            # Add all files except config
             subprocess.run(['git', 'add', '.'], cwd=project_path, check=True)
-            self.log_callback("📝 Added files to staging")
+            subprocess.run(['git', 'reset', 'github_config.json'], cwd=project_path, check=True)
+            self.log_callback("📝 Added files to staging (excluding config)")
             
             # Commit changes
             subprocess.run(['git', 'commit', '-m', commit_msg], cwd=project_path, check=True)
