@@ -11,6 +11,12 @@ A simple Windows desktop application that makes GitHub operations easy with just
 - **🗑️ Delete Repository** - Safely delete repositories (with confirmation)
 - **📊 View Repository Info** - Get detailed information about your repositories
 
+## 📸 Screenshot
+
+Place an image in `assets/` (create the folder if it doesn't exist) and update the path if needed.
+
+![App Screenshot](assets/screenshot.png)
+
 ## 🛠️ Installation & Usage
 
 1. **Download** this repository and extract the files into a folder on your computer.
@@ -25,7 +31,6 @@ A simple Windows desktop application that makes GitHub operations easy with just
 ⚠️ Always open the app using START_HERE.bat. Do not try to run it directly from other files.
 
 👉 When you’re finished, just close both windows (the app and the terminal that opened with it).
-
 
 ### Manual Installation
 
@@ -117,7 +122,7 @@ python github_assistant.py
 
 ## 📝 Notes
 
-- Your GitHub token is stored locally in `github_config.json`
+- Your GitHub token is stored locally in `github_config.json` (this file is ignored by git via `.gitignore` and not included in this repo)
 - The last selected project folder is remembered
 - All operations are logged in the status area
 - The app remembers your settings between sessions
@@ -125,13 +130,10 @@ python github_assistant.py
 - **Upload timeouts**: Large uploads have a 1-hour timeout limit
 - **File size warnings**: You'll be warned about large files before upload
 
-## 🚨 Important Security Notes
+## 🔐 Security & SmartScreen
 
-- Never share your GitHub Personal Access Token
-- The token is stored locally on your computer in `github_config.json`
-- The config file is automatically excluded from Git commits via `.gitignore`
-- If you suspect your token is compromised, revoke it on GitHub and create a new one
-- Always use tokens with minimal required permissions
+- Never share your GitHub Personal Access Token. Keep it private.
+- Windows SmartScreen may warn about unsigned scripts/executables. This project ships as source and batch files; you can review and run locally. If you package it as an EXE for distribution, consider code-signing to avoid SmartScreen prompts.
 
 ## 🐛 Troubleshooting
 
@@ -148,6 +150,14 @@ python github_assistant.py
 - Make sure you have access to the repository
 - Check the repository name is spelled correctly
 
+### Git LFS issues
+- Run `check_git_lfs.bat` to verify installation and environment
+- Large files greater than 100MB may upload slowly without LFS
+
+## 📜 License
+
+This project is licensed under the MIT License - see the `LICENSE` file for details.
+
 ## 📞 Support
 
 If you encounter any issues:
@@ -162,7 +172,6 @@ If you encounter any issues:
 - The developer is **not liable for any data loss, repository deletion, or unintended consequences** resulting from the use of this application.  
 - Always double-check before performing destructive actions (such as deleting repositories).  
 - By using this tool, you agree to take full responsibility for your GitHub account and data.  
-
 
 ## 🎉 Enjoy!
 

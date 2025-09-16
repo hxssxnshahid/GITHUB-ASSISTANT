@@ -1414,7 +1414,11 @@ class FirstTimeSetupDialog:
         
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("🚀 Welcome to GitHub Assistant!")
-        self.dialog.geometry("600x500")
+        self.dialog.geometry("700x650")
+        try:
+            self.dialog.minsize(650, 600)
+        except Exception:
+            pass
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -1432,65 +1436,27 @@ class FirstTimeSetupDialog:
                                  font=('Arial', 16, 'bold'))
         welcome_label.pack(pady=(0, 20))
         
-        # Instructions
-        instructions = ttk.Label(main_frame, 
-                               text="Let's get you set up in just a few steps!",
-                               font=('Arial', 12))
-        instructions.pack(pady=(0, 20))
+        # Single instructions panel
+        instructions_frame = ttk.LabelFrame(main_frame, text="Get a GitHub Token", padding="15")
+        instructions_frame.pack(fill=tk.X, pady=(0, 20))
         
-        # Step 1
-        step1_frame = ttk.LabelFrame(main_frame, text="Step 1: Get a GitHub Token", padding="15")
-        step1_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        step1_text = """To upload projects to GitHub, you need a Personal Access Token.
+        instructions_text = """To upload projects to GitHub, you need a Personal Access Token.
 
 1. Click the button below to open GitHub
 2. Click "Generate new token (classic)"
-3. Give it a name like "GitHub Assistant"
-4. Select these scopes: repo, public_repo
-5. Click "Generate token"
-6. Copy the token (you won't see it again!)"""
-        
-        ttk.Label(step1_frame, text=step1_text, justify=tk.LEFT).pack(anchor=tk.W)
-        
-        ttk.Button(step1_frame, text="🌐 Open GitHub Token Page", 
+3. Name it (e.g., "GitHub Assistant")
+4. Select scopes: repo, public_repo (and delete_repo if needed)
+5. Click "Generate token" and copy it
+
+Paste the token later in the main window's GitHub Authentication section."""
+        ttk.Label(instructions_frame, text=instructions_text, justify=tk.LEFT).pack(anchor=tk.W)
+        ttk.Button(instructions_frame, text="Open GitHub Token Page", 
                   command=self.open_token_page).pack(pady=(10, 0))
         
-        # Step 2
-        step2_frame = ttk.LabelFrame(main_frame, text="Step 2: Enter Your Token", padding="15")
-        step2_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        ttk.Label(step2_frame, text="Paste your token here:").pack(anchor=tk.W)
-        
-        self.token_var = tk.StringVar()
-        token_entry = ttk.Entry(step2_frame, textvariable=self.token_var, show="*", width=50)
-        token_entry.pack(fill=tk.X, pady=(5, 10))
-        
-        # Step 3
-        step3_frame = ttk.LabelFrame(main_frame, text="Step 3: Test Connection", padding="15")
-        step3_frame.pack(fill=tk.X, pady=(0, 20))
-        
-        ttk.Label(step3_frame, text="Click the button below to test your connection:").pack(anchor=tk.W)
-        
-        self.test_btn = ttk.Button(step3_frame, text="🔗 Test Connection", 
-                                  command=self.test_connection)
-        self.test_btn.pack(pady=(10, 0))
-        
-        # Status
-        self.status_var = tk.StringVar(value="Ready to test connection")
-        status_label = ttk.Label(step3_frame, textvariable=self.status_var, 
-                               font=('Arial', 9), foreground='blue')
-        status_label.pack(pady=(10, 0))
-        
-        # Buttons
+        # Footer buttons
         button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=(20, 0))
-        
-        self.finish_btn = ttk.Button(button_frame, text="✅ Finish Setup", 
-                                    command=self.finish_setup, state='disabled')
-        self.finish_btn.pack(side=tk.RIGHT, padx=(10, 0))
-        
-        ttk.Button(button_frame, text="⏭️ Skip for Now", 
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(button_frame, text="Next", 
                   command=self.skip_setup).pack(side=tk.RIGHT)
     
     def open_token_page(self):
@@ -1515,24 +1481,45 @@ class FirstTimeSetupDialog:
         self.status_var.set("Testing connection...")
         self.dialog.update()
         
-        # Test in background thread
+        # Track progress and add a watchdog to avoid indefinite hangs
+        self._test_in_progress = True
+
+        # Test in background thread with timeout
         def test_thread():
             try:
                 from github import Github
-                github = Github(token)
+                # Use a network timeout so calls don't hang forever
+                github = Github(token, timeout=10)
                 user = github.get_user()
-                
                 # Update UI in main thread
                 self.dialog.after(0, lambda: self.connection_success(user.login))
-                
             except Exception as e:
                 self.dialog.after(0, lambda: self.connection_error(str(e)))
-        
+
         thread = threading.Thread(target=test_thread, daemon=True)
         thread.start()
+
+        # Watchdog: if still in progress after 15s, report timeout
+        def watchdog_fire():
+            if getattr(self, '_test_in_progress', False):
+                self.connection_error("Connection timed out. Check internet or proxy settings and try again.")
+
+        try:
+            self._watchdog_timer = threading.Timer(15.0, lambda: self.dialog.after(0, watchdog_fire))
+            self._watchdog_timer.daemon = True
+            self._watchdog_timer.start()
+        except Exception:
+            pass
     
     def connection_success(self, username):
         """Handle successful connection"""
+        # Stop watchdog and mark complete
+        try:
+            if hasattr(self, '_watchdog_timer'):
+                self._watchdog_timer.cancel()
+        except Exception:
+            pass
+        self._test_in_progress = False
         self.test_btn.config(state='normal', text="🔗 Test Connection")
         self.status_var.set(f"✅ Connected as {username}")
         self.finish_btn.config(state='normal')
@@ -1540,6 +1527,13 @@ class FirstTimeSetupDialog:
     
     def connection_error(self, error_msg):
         """Handle connection error"""
+        # Stop watchdog and mark complete
+        try:
+            if hasattr(self, '_watchdog_timer'):
+                self._watchdog_timer.cancel()
+        except Exception:
+            pass
+        self._test_in_progress = False
         self.test_btn.config(state='normal', text="🔗 Test Connection")
         self.status_var.set("❌ Connection failed")
         messagebox.showerror("Connection Error", f"Failed to connect to GitHub:\n{error_msg}")
@@ -1572,7 +1566,7 @@ class FirstTimeSetupDialog:
     
     def skip_setup(self):
         """Skip setup for now"""
-        self.log_callback("⏭️ Setup skipped - you can configure later")
+        self.log_callback("Proceeding to the main window. You can enter your token here.")
         self.dialog.destroy()
 
 if __name__ == "__main__":
