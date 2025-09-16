@@ -43,11 +43,17 @@ python github_assistant.py
 1. Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens/new)
 2. Click "Generate new token (classic)"
 3. Give it a name like "GitHub Assistant"
-4. Select these scopes:
-   - `repo` (Full control of private repositories)
-   - `public_repo` (Access public repositories)
+4. Select these scopes (depending on what you need):
+
+   - **Required for most features (create, upload, update, view repos):**
+     - `repo` (Full control of private repositories)
+     - `public_repo` (Access public repositories)
+
+   - **Optional (only if you want to use the Delete Repository feature):**
+     - `delete_repo` (Allows deleting repositories)
+
 5. Click "Generate token"
-6. Copy the token (you won't see it again!)
+6. Copy the token (you won’t see it again!)
 
 ### 2. Connect to GitHub
 
