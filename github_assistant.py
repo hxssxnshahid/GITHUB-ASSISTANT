@@ -124,6 +124,59 @@ class GitHubAssistant:
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
+    
+    def check_large_files(self, project_path):
+        """Check for files larger than 100MB and warn user"""
+        large_files = []
+        total_size = 0
+        
+        for root, dirs, files in os.walk(project_path):
+            # Skip .git directory
+            if '.git' in dirs:
+                dirs.remove('.git')
+            
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    file_size = os.path.getsize(file_path)
+                    total_size += file_size
+                    
+                    # Check for files larger than 100MB
+                    if file_size > 100 * 1024 * 1024:  # 100MB
+                        large_files.append((file_path, file_size))
+                except (OSError, IOError):
+                    continue
+        
+        return large_files, total_size
+    
+    def setup_git_lfs(self, project_path):
+        """Setup Git LFS for large files"""
+        try:
+            # Check if Git LFS is available
+            subprocess.run(['git', 'lfs', 'version'], check=True, capture_output=True, text=True)
+            
+            # Initialize Git LFS
+            subprocess.run(['git', 'lfs', 'install'], cwd=project_path, check=True, capture_output=True, text=True)
+            
+            # Track common large file types
+            large_file_patterns = [
+                '*.zip', '*.rar', '*.7z', '*.tar', '*.gz',
+                '*.exe', '*.msi', '*.dmg', '*.pkg',
+                '*.mp4', '*.avi', '*.mov', '*.mkv',
+                '*.iso', '*.img', '*.bin',
+                '*.dll', '*.so', '*.dylib',
+                '*.db', '*.sqlite', '*.sqlite3'
+            ]
+            
+            for pattern in large_file_patterns:
+                try:
+                    subprocess.run(['git', 'lfs', 'track', pattern], cwd=project_path, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError:
+                    pass  # Pattern might already be tracked
+            
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
         
     def set_status(self, status):
         """Update status bar"""
@@ -238,9 +291,29 @@ class GitHubAssistant:
         if not self.check_git_available():
             messagebox.showerror("Error", "Git is not installed or not in PATH. Please install Git from https://git-scm.com/")
             return
+        
+        # Check for large files
+        project_path = self.project_var.get()
+        large_files, total_size = self.check_large_files(project_path)
+        
+        if large_files:
+            # Show warning about large files
+            large_file_list = "\n".join([f"- {os.path.basename(f[0])} ({f[1] // (1024*1024)}MB)" for f in large_files[:5]])
+            if len(large_files) > 5:
+                large_file_list += f"\n- ... and {len(large_files) - 5} more files"
             
+            total_mb = total_size // (1024*1024)
+            warning_msg = f"⚠️ LARGE FILES DETECTED ⚠️\n\n" \
+                         f"Total project size: {total_mb}MB\n" \
+                         f"Large files (>100MB):\n{large_file_list}\n\n" \
+                         f"GitHub has a 100MB file limit. Large files will be handled with Git LFS.\n" \
+                         f"Continue with upload?"
+            
+            if not messagebox.askyesno("Large Files Detected", warning_msg):
+                return
+        
         # Create dialog for upload details
-        dialog = UploadDialog(self.root, self.github, self.project_var.get(), self.log_message, self.set_status)
+        dialog = UploadDialog(self.root, self.github, project_path, self.log_message, self.set_status)
         self.root.wait_window(dialog.dialog)
         
     def update_repo(self):
@@ -620,15 +693,22 @@ class UploadDialog:
             )
             is_first_push = (ls_remote.returncode != 0) or (ls_remote.stdout.strip() == '')
 
-            # Push to GitHub
-            subprocess.run(
-                ['git', 'push', '-u', 'origin', branch],
-                cwd=project_path,
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            self.log_callback(f"🚀 Pushed to {branch} branch")
+            # Push to GitHub with progress indication
+            self.log_callback(f"🚀 Pushing to {branch} branch... (this may take a while for large files)")
+            try:
+                subprocess.run(
+                    ['git', 'push', '-u', 'origin', branch],
+                    cwd=project_path,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=3600  # 1 hour timeout for large uploads
+                )
+                self.log_callback(f"🚀 Pushed to {branch} branch")
+            except subprocess.TimeoutExpired:
+                self.log_callback("⏰ Upload timed out - this may happen with very large files")
+                self.log_callback("💡 Try uploading smaller chunks or use Git command line")
+                raise
 
             if has_changes or is_first_push:
                 self.log_callback(f"✅ Project uploaded successfully to {repo.html_url}")
@@ -670,6 +750,20 @@ class UploadDialog:
             subprocess.run(['git', 'init'], cwd=project_path, check=True)
             self.log_callback("🆕 Initialized git repository")
             
+            # Setup Git LFS for large files
+            if self.setup_git_lfs(project_path):
+                self.log_callback("📦 Git LFS initialized for large files")
+            else:
+                self.log_callback("⚠️ Git LFS not available - large files may cause issues")
+            
+            # Configure Git for large files
+            try:
+                subprocess.run(['git', 'config', 'http.postBuffer', '524288000'], cwd=project_path, check=True)  # 500MB
+                subprocess.run(['git', 'config', 'http.maxRequestBuffer', '524288000'], cwd=project_path, check=True)  # 500MB
+                self.log_callback("⚙️ Git configured for large file uploads")
+            except subprocess.CalledProcessError:
+                self.log_callback("⚠️ Could not configure Git for large files")
+            
             # Add remote
             subprocess.run(['git', 'remote', 'add', 'origin', repo.clone_url], 
                          cwd=project_path, check=True)
@@ -708,9 +802,23 @@ class UploadDialog:
             except subprocess.CalledProcessError:
                 pass  # Branch might already be main
             
-            # Push to GitHub
-            subprocess.run(['git', 'push', '-u', 'origin', branch], cwd=project_path, check=True)
-            self.log_callback(f"🚀 Pushed to {branch} branch")
+            # Push to GitHub with progress indication
+            self.log_callback(f"🚀 Pushing to {branch} branch... (this may take a while for large files)")
+            try:
+                # Use git push with progress for large files
+                result = subprocess.run(
+                    ['git', 'push', '-u', 'origin', branch], 
+                    cwd=project_path, 
+                    check=True, 
+                    capture_output=True, 
+                    text=True,
+                    timeout=3600  # 1 hour timeout for large uploads
+                )
+                self.log_callback(f"🚀 Pushed to {branch} branch")
+            except subprocess.TimeoutExpired:
+                self.log_callback("⏰ Upload timed out - this may happen with very large files")
+                self.log_callback("💡 Try uploading smaller chunks or use Git command line")
+                raise
             
             self.log_callback(f"✅ Project uploaded successfully to {repo.html_url}")
             messagebox.showinfo("Success", f"Project uploaded to {repo.name} successfully!")

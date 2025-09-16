@@ -96,6 +96,7 @@ python github_assistant.py
 - Windows 10 or later
 - Python 3.7 or later
 - Git (for cloning repositories)
+- Git LFS (for large files > 100MB) - [Download here](https://git-lfs.github.io/)
 - Internet connection
 
 ## 📝 Notes
@@ -104,6 +105,9 @@ python github_assistant.py
 - The last selected project folder is remembered
 - All operations are logged in the status area
 - The app remembers your settings between sessions
+- **Large file support**: Files > 100MB are automatically handled with Git LFS
+- **Upload timeouts**: Large uploads have a 1-hour timeout limit
+- **File size warnings**: You'll be warned about large files before upload
 
 ## 🚨 Important Security Notes
 
